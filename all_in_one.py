@@ -23,7 +23,7 @@ LINE_CONFIG = {
 }
 
 # 只抓取「幾個小時內」發布的新文章？
-MAX_ARTICLE_AGE_HOURS = 03
+MAX_ARTICLE_AGE_HOURS = 3
 
 # 是否在每次發現新文章時都附帶發送儀表板圖片？（True = 只要有新文章就發戰情圖；False = 只有發生客訴/斷線才發）
 ALWAYS_SEND_DASHBOARD_ON_NEW = True
