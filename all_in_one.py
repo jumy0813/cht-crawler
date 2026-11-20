@@ -429,7 +429,12 @@ def step_notify():
     total_count = state.get("total_count", 0)
     keyword = state.get("keyword", "中華電信")
 
-    if not alerts and not (ALWAYS_SEND_DASHBOARD_ON_NEW and new_count > 0):
+    is_manual = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
+    if (
+        not alerts
+        and not is_manual
+        and not (ALWAYS_SEND_DASHBOARD_ON_NEW and new_count > 0)
+    ):
         print("[LINE 略過] 本次無新客訴且無需發送戰情圖。")
         return
 
