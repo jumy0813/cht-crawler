@@ -248,3 +248,459 @@ def generate_dashboards(df_all, new_count, alert_count, keyword="中華電信"):
                 fontweight="bold",
                 color="#334155",
             )
+        ax1.set_xlim(0, max(platform_counts.values) * 1.18)
+
+        # 右圖：近 24 小時分時段趨勢折線圖
+        ax2 = fig1.add_axes([0.53, 0.13, 0.40, 0.55], facecolor="white")
+        hours_list = [(now_dt - timedelta(hours=i)).replace(minute=0, second=0, microsecond=0) for i in range(23, -1, -1)]
+        hour_labels = [h.strftime("%H:%M") for h in hours_list]
+        total_by_hour = {h: 0 for h in hours_list}
+        alert_by_hour = {h: 0 for h in hours_list}
+
+        for _, row in df_all.iterrows():
+            dt = parse_to_tw_datetime(row.get("發布時間")) or parse_to_tw_datetime(row.get("抓取時間"))
+            if dt:
+                dt_hour = dt.replace(minute=0, second=0, microsecond=0)
+                if dt_hour in total_by_hour:
+                    total_by_hour[dt_hour] += 1
+                    if "技術障礙" in str(row.get("主題分類", "")):
+                        alert_by_hour[dt_hour] += 1
+
+        y_total = [total_by_hour[h] for h in hours_list]
+        y_alert = [alert_by_hour[h] for h in hours_list]
+
+        ax2.plot(range(24), y_total, color="#3B82F6", linewidth=2.2, marker="o", markersize=4, label="全網總聲量")
+        ax2.plot(range(24), y_alert, color="#DC2626", linewidth=2.8, marker="s", markersize=5, label="技術障礙/斷網")
+        ax2.fill_between(range(24), y_alert, color="#FCA5A5", alpha=0.35)
+
+        ax2.set_title("近 24 小時分時段聲量趨勢", fontsize=13.5, fontweight="bold", color="#1E293B", pad=12)
+        ax2.set_xticks(range(0, 24, 4))
+        ax2.set_xticklabels([hour_labels[i] for i in range(0, 24, 4)], fontsize=9.5)
+        ax2.yaxis.get_major_locator().set_params(integer=True)
+        ax2.spines["top"].set_visible(False)
+        ax2.spines["right"].set_visible(False)
+        ax2.spines["left"].set_color("#CBD5E1")
+        ax2.spines["bottom"].set_color("#CBD5E1")
+        ax2.grid(axis="y", linestyle="--", alpha=0.4)
+        ax2.legend(loc="upper left", frameon=True, facecolor="white", edgecolor="#E2E8F0", fontsize=10)
+
+    plt.savefig(DASHBOARD_IMG, bbox_inches="tight", facecolor=fig1.get_facecolor())
+    plt.close(fig1)
+
+    # =================================================================
+    # 圖卡 2：alert_card.png（障礙熱點定位 ＋ 最新 5 則技術障礙時間軸）
+    # =================================================================
+    fig2 = plt.figure(figsize=(11, 7.2), dpi=160, facecolor=bg_color)
+    fig2.suptitle(
+        f"🚨 【{keyword}】障礙熱點定位與即時快訊（圖 2/2）",
+        fontsize=20,
+        fontweight="bold",
+        color="#991B1B" if is_emergency else "#1E293B",
+        y=0.95,
+    )
+
+    all_alerts_df = df_all[df_all["主題分類"].str.contains("技術障礙", na=False)] if not df_all.empty else pd.DataFrame()
+    recent_alerts = []
+    cutoff_24h = now_dt - timedelta(hours=24)
+    for _, row in all_alerts_df.iterrows():
+        dt = parse_to_tw_datetime(row.get("發布時間")) or parse_to_tw_datetime(row.get("抓取時間"))
+        if dt and dt >= cutoff_24h:
+            recent_alerts.append(row)
+    df_hotspot_source = pd.DataFrame(recent_alerts) if recent_alerts else all_alerts_df.head(10)
+    region_str, service_str = extract_hotspots(df_hotspot_source)
+
+    # 上方熱點定位資訊框
+    ax_top = fig2.add_axes([0.06, 0.69, 0.88, 0.19], facecolor="#FFF1F2")
+    ax_top.set_xticks([])
+    ax_top.set_yticks([])
+    for spine in ax_top.spines.values():
+        spine.set_edgecolor("#FCA5A5")
+        spine.set_linewidth(1.5)
+
+    ax_top.text(
+        0.03, 0.68,
+        f"📍 疑似受災地區熱點：  {region_str}",
+        fontsize=13, fontweight="bold", color="#991B1B", va="center"
+    )
+    ax_top.text(
+        0.03, 0.28,
+        f"📡 主要影響業務類別：  {service_str}",
+        fontsize=13, fontweight="bold", color="#1E293B", va="center"
+    )
+
+    # 下方最新 5 則技術障礙時間軸清單
+    ax_list = fig2.add_axes([0.06, 0.08, 0.88, 0.57], facecolor="white")
+    ax_list.set_xticks([])
+    ax_list.set_yticks([])
+    for spine in ax_list.spines.values():
+        spine.set_edgecolor("#CBD5E1")
+        spine.set_linewidth(1.2)
+
+    ax_list.text(
+        0.03, 0.91,
+        "🕒 最新「技術障礙 / 斷網」貼文時間軸（Top 5）",
+        fontsize=14, fontweight="bold", color="#1E293B", va="center"
+    )
+    ax_list.plot([0.03, 0.97], [0.83, 0.83], color="#E2E8F0", linewidth=1.2, transform=ax_list.transAxes)
+
+    top5_alerts = all_alerts_df.head(5)
+    if top5_alerts.empty:
+        ax_list.text(
+            0.5, 0.45,
+            "✅ 目前資料庫中尚無任何網路斷線或技術障礙紀錄。",
+            ha="center", va="center", fontsize=14, color="#64748B"
+        )
+    else:
+        y_slots = [0.71, 0.55, 0.39, 0.23, 0.07]
+        for idx, (_, row) in enumerate(top5_alerts.iterrows()):
+            platform = str(row.get("平台分類", "未知平台")).replace(" (直抓完整版)", "")
+            title = str(row.get("文章標題", "")).strip()
+            dt = parse_to_tw_datetime(row.get("發布時間")) or parse_to_tw_datetime(row.get("抓取時間"))
+            time_tag = dt.strftime("%m/%d %H:%M") if dt else "時間未知"
+
+            if len(title) > 36:
+                title = title[:35] + "..."
+
+            ax_list.text(
+                0.03, y_slots[idx],
+                f"{idx + 1}.  [{time_tag}]  【{platform}】  {title}",
+                fontsize=12.5, color="#1E293B", va="center"
+            )
+            if idx < len(top5_alerts) - 1:
+                line_y = y_slots[idx] - 0.08
+                ax_list.plot([0.03, 0.97], [line_y, line_y], color="#F1F5F9", linewidth=1, transform=ax_list.transAxes)
+
+    fig2.text(
+        0.94,
+        0.025,
+        f"資料更新時間：{now_str} (台灣時間) ｜ 累積技術障礙：{len(all_alerts_df)} 篇",
+        ha="right",
+        fontsize=10,
+        color="#64748B",
+    )
+
+    plt.savefig(ALERT_CARD_IMG, bbox_inches="tight", facecolor=fig2.get_facecolor())
+    plt.close(fig2)
+    print(f"[儀表板] 已成功生成雙戰情室圖卡：{DASHBOARD_IMG} 與 {ALERT_CARD_IMG}")
+
+
+def is_recent_article(pub_date_str, max_hours=MAX_ARTICLE_AGE_HOURS):
+    if not pub_date_str:
+        return True
+    now_utc = datetime.now(timezone.utc)
+    cutoff_utc = now_utc - timedelta(hours=max_hours)
+
+    dt_tw = parse_to_tw_datetime(pub_date_str)
+    if dt_tw is not None:
+        return dt_tw.astimezone(timezone.utc) >= cutoff_utc
+    return True
+
+
+def classify_article(title, content=""):
+    clean_content = "" if content == "（請點擊連結查看完整貼文）" else str(content)
+    text_to_check = f"{title} {clean_content}".lower()
+
+    matched_categories = []
+    for category, keywords in CATEGORY_KEYWORDS.items():
+        if any(kw.lower() in text_to_check for kw in keywords):
+            matched_categories.append(category)
+
+    return " / ".join(matched_categories) if matched_categories else "一般討論/其他"
+
+
+def fetch_google_rss(query, platform_label, max_results=20):
+    time_bounded_query = f"{query} when:1d"
+    encoded_q = urllib.parse.quote(time_bounded_query)
+    url = f"https://news.google.com/rss/search?q={encoded_q}&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
+
+    results = []
+    try:
+        res = requests.get(url, headers=HEADERS, timeout=10)
+        soup = BeautifulSoup(res.content, "xml")
+        items = soup.find_all("item")
+
+        for item in items[:max_results]:
+            title = item.title.text.strip() if item.title else ""
+            link = item.link.text.strip() if item.link else ""
+            pub_date = item.pubDate.text.strip() if item.pubDate else ""
+            source = item.source.text.strip() if item.source else platform_label
+
+            if not is_recent_article(pub_date):
+                continue
+
+            summary = "（請點擊連結查看完整貼文）"
+            category = classify_article(title, summary)
+
+            results.append({
+                "抓取時間": get_tw_now().strftime("%Y-%m-%d %H:%M:%S"),
+                "主題分類": category,
+                "平台分類": platform_label,
+                "來源網站": source,
+                "文章標題": title,
+                "發布時間": pub_date,
+                "文章連結": link,
+                "內文摘要": summary,
+            })
+    except Exception as e:
+        print(f"[{platform_label}] 抓取發生錯誤: {e}")
+
+    return results
+
+
+def fetch_ptt_direct(keyword="中華電信", pages=2):
+    base_url = "https://www.ptt.cc"
+    encoded_kw = urllib.parse.quote(keyword)
+    current_url = f"{base_url}/bbs/MobileComm/search?q={encoded_kw}"
+    cookies = {"over18": "1"}
+
+    results = []
+    for _ in range(pages):
+        try:
+            res = requests.get(current_url, headers=HEADERS, cookies=cookies, timeout=10)
+            if res.status_code != 200:
+                break
+
+            soup = BeautifulSoup(res.text, "html.parser")
+            entries = soup.find_all("div", class_="r-ent")
+            stop_paging = False
+
+            for entry in entries:
+                a_tag = (
+                    entry.find("div", class_="title").find("a")
+                    if entry.find("div", class_="title")
+                    else None
+                )
+                if not a_tag:
+                    continue
+
+                title = a_tag.text.strip()
+                link = base_url + a_tag["href"]
+
+                art_res = requests.get(link, headers=HEADERS, cookies=cookies, timeout=10)
+                art_soup = BeautifulSoup(art_res.text, "html.parser")
+                main_content = art_soup.find("div", id="main-content")
+
+                pub_time, clean_content = "", ""
+                if main_content:
+                    metas = main_content.find_all("span", class_="article-meta-value")
+                    pub_time = metas[3].text.strip() if len(metas) >= 4 else ""
+
+                    if pub_time and not is_recent_article(pub_time):
+                        stop_paging = True
+                        continue
+
+                    for tag in main_content.find_all(
+                        "div", class_=["article-metaline", "article-metaline-right", "push"]
+                    ):
+                        tag.decompose()
+                    raw_text = main_content.text.strip()
+                    clean_content = (
+                        raw_text.split("※ 發信站:")[0].strip()
+                        if "※ 發信站:" in raw_text
+                        else raw_text
+                    )
+
+                category = classify_article(title, clean_content)
+
+                results.append({
+                    "抓取時間": get_tw_now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "主題分類": category,
+                    "平台分類": "PTT (直抓完整版)",
+                    "來源網站": "PTT MobileComm",
+                    "文章標題": title,
+                    "發布時間": pub_time,
+                    "文章連結": link,
+                    "內文摘要": clean_content,
+                })
+                time.sleep(0.5)
+
+            if stop_paging:
+                break
+
+            paging_div = soup.find("div", class_="btn-group-paging")
+            prev_btn = paging_div.find_all("a", class_="btn")[1] if paging_div else None
+            if prev_btn and "href" in prev_btn.attrs:
+                current_url = base_url + prev_btn["href"]
+            else:
+                break
+        except Exception as e:
+            print(f"[PTT] 抓取發生錯誤: {e}")
+            break
+
+    return results
+
+
+def step_crawl_and_plot(keyword="中華電信"):
+    """第一階段：執行全網爬蟲、更新 CSV、繪製雙戰情室圖卡並暫存本次告警狀態"""
+    new_data = []
+    print(f"=== 開始執行雲端全網輿情爬蟲（關鍵字：{keyword}）===\n")
+
+    new_data.extend(fetch_google_rss(f"{keyword}", "新聞媒體", max_results=30))
+    new_data.extend(fetch_ptt_direct(keyword=keyword, pages=2))
+
+    social_targets = [
+        ("Dcard", f"{keyword} site:dcard.tw"),
+        ("Mobile01", f"{keyword} site:mobile01.com"),
+        ("Threads", f"{keyword} site:threads.net"),
+        ("Facebook", f"{keyword} site:facebook.com"),
+    ]
+    for platform_name, search_query in social_targets:
+        new_data.extend(fetch_google_rss(search_query, platform_name, max_results=20))
+        time.sleep(1)
+
+    column_order = [
+        "抓取時間", "主題分類", "平台分類", "來源網站",
+        "文章標題", "發布時間", "文章連結", "內文摘要",
+    ]
+
+    df_new = pd.DataFrame(new_data, columns=column_order)
+    if not df_new.empty:
+        df_new.drop_duplicates(subset=["文章連結"], inplace=True)
+        df_new.drop_duplicates(subset=["文章標題"], inplace=True)
+
+    if os.path.exists(OUTPUT_FILE):
+        df_old = pd.read_csv(OUTPUT_FILE, encoding="utf-8-sig")
+        old_links = set(df_old["文章連結"].dropna().astype(str))
+        old_titles = set(df_old["文章標題"].dropna().astype(str))
+
+        mask_new = (~df_new["文章連結"].astype(str).isin(old_links)) & (
+            ~df_new["文章標題"].astype(str).isin(old_titles)
+        )
+        df_filtered = df_new[mask_new]
+        df_final = pd.concat([df_filtered, df_old], ignore_index=True)
+    else:
+        df_filtered = df_new
+        df_final = df_new
+
+    df_final = df_final[column_order]
+    df_final.to_csv(OUTPUT_FILE, index=False, encoding="utf-8-sig")
+
+    alert_articles = (
+        df_filtered[df_filtered["主題分類"].str.contains("技術障礙", na=False)]
+        if not df_filtered.empty
+        else pd.DataFrame(columns=column_order)
+    )
+
+    generate_dashboards(
+        df_final,
+        new_count=len(df_filtered),
+        alert_count=len(alert_articles),
+        keyword=keyword,
+    )
+
+    region_str, service_str = extract_hotspots(alert_articles)
+
+    state = {
+        "keyword": keyword,
+        "new_count": len(df_filtered),
+        "total_count": len(df_final),
+        "region_hotspot": region_str,
+        "service_hotspot": service_str,
+        "alerts": alert_articles.head(10).to_dict(orient="records"),
+    }
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False)
+
+
+def step_notify():
+    """第二階段：讀取暫存告警狀態，將文字訊息 + 2 張戰情圖卡一併發送到 LINE"""
+    if not LINE_CONFIG["enabled"] or not os.path.exists(STATE_FILE):
+        return
+
+    token = LINE_CONFIG["channel_access_token"]
+    user_id = LINE_CONFIG["user_id"]
+    print(f"[診斷資訊] 讀取到的 LINE_TOKEN 長度為：{len(token)} 字元")
+
+    if not token or not user_id:
+        print("[LINE 錯誤] LINE_TOKEN 或 LINE_USER_ID 為空值！請確認 GitHub Secrets 設定。")
+        return
+
+    with open(STATE_FILE, "r", encoding="utf-8") as f:
+        state = json.load(f)
+
+    alerts = state.get("alerts", [])
+    new_count = state.get("new_count", 0)
+    total_count = state.get("total_count", 0)
+    keyword = state.get("keyword", "中華電信")
+    region_str = state.get("region_hotspot", "")
+    service_str = state.get("service_hotspot", "")
+
+    is_manual = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
+    if (
+        not alerts
+        and not is_manual
+        and not (ALWAYS_SEND_DASHBOARD_ON_NEW and new_count > 0)
+    ):
+        print("[LINE 略過] 本次無新技術障礙且無需發送戰情圖。")
+        return
+
+    now_str = get_tw_now().strftime("%Y-%m-%d %H:%M")
+    repo = os.environ.get("GITHUB_REPO", "")
+    branch = os.environ.get("GITHUB_BRANCH", "main")
+    cache_buster = int(time.time())
+
+    img1_url = f"https://raw.githubusercontent.com/{repo}/{branch}/dashboard.png?t={cache_buster}" if repo else ""
+    img2_url = f"https://raw.githubusercontent.com/{repo}/{branch}/alert_card.png?t={cache_buster}" if repo else ""
+
+    if alerts:
+        lines = [
+            "🚨 【雲端技術障礙告警】",
+            f"偵測到 {len(alerts)} 篇「{keyword} - 技術障礙/斷網」最新貼文！",
+            f"📍 地區熱點：{region_str}",
+            f"📡 影響業務：{service_str}",
+            f"🕒 時間：{now_str} (台灣時間)",
+            "━━━━━━━━━━━━━━",
+        ]
+        for idx, row in enumerate(alerts, start=1):
+            dt = parse_to_tw_datetime(row.get("發布時間")) or parse_to_tw_datetime(row.get("抓取時間"))
+            time_tag = dt.strftime("%H:%M") if dt else "--:--"
+            lines.append(f"\n{idx}. [{time_tag}] [{row['平台分類']}] {row['文章標題']}")
+            lines.append(f"🔗 {row['文章連結']}")
+    else:
+        lines = [
+            f"📊 【{keyword} 障礙與輿情戰情快報】",
+            f"本次新增 {new_count} 篇最新討論（無新增技術障礙/斷網）。",
+            f"累積總收錄：{total_count} 篇｜時間：{now_str}",
+        ]
+
+    messages = [{"type": "text", "text": "\n".join(lines)}]
+
+    if img1_url:
+        messages.append({
+            "type": "image",
+            "originalContentUrl": img1_url,
+            "previewImageUrl": img1_url,
+        })
+    if img2_url:
+        messages.append({
+            "type": "image",
+            "originalContentUrl": img2_url,
+            "previewImageUrl": img2_url,
+        })
+
+    url = "https://api.line.me/v2/bot/message/push"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {token}",
+    }
+    payload = {
+        "to": user_id,
+        "messages": messages,
+    }
+
+    res = requests.post(url, headers=headers, json=payload, timeout=15)
+    if res.status_code == 200:
+        print("[LINE 通知] 已成功發送雙戰情室圖卡！")
+    else:
+        print(f"[LINE 失敗] 狀態碼：{res.status_code}，錯誤：{res.text}")
+
+
+if __name__ == "__main__":
+    if "--step" in sys.argv:
+        step_name = sys.argv[sys.argv.index("--step") + 1]
+        if step_name == "crawl_and_plot":
+            step_crawl_and_plot(keyword="中華電信")
+        elif step_name == "notify":
+            step_notify()
+    else:
+        step_crawl_and_plot(keyword="中華電信")
