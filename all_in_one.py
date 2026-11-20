@@ -11,8 +11,8 @@ import requests
 # ==========================================
 LINE_CONFIG = {
     "enabled": True,
-    "channel_access_token": os.environ.get("fVGM5SgXQ/CZ4fmgr9hbY5swo2q0Z56bPGDn6zj9sAG8jh6xv53drabuVerZ7Saq9flPj/oCqLKrlPFt/UQCapgh5Gx9hc3ZCBDKScp1Z6Y9H4o2D79+9IuhMO3a8eMnTS6SCcDmQ9XmuqaJv5YwsAdB04t89/1O/w1cDnyilFU=", ""),
-    "user_id": os.environ.get("U6bcc27b5c9c059a25e296cc3285c84ff", ""),
+    "channel_access_token": os.environ.get("LINE_TOKEN", ""),
+    "user_id": os.environ.get("LINE_USER_ID", ""),
 }
 
 HEADERS = {
