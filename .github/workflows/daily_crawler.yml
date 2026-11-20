@@ -1,0 +1,39 @@
+name: 每日中華電信輿情爬蟲
+
+on:
+  schedule:
+    # UTC 時間 01:00 = 台灣時間每天早上 09:00
+    - cron: '0 1 * * *'
+  # 允許在網頁上手動點擊按鈕立刻測試
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  run-crawler:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 1. 下載倉庫最新檔案（包含昨天的舊 CSV）
+        uses: actions/checkout@v4
+
+      - name: 2. 安裝 Python 環境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 3. 安裝爬蟲套件
+        run: pip install -r requirements.txt
+
+      - name: 4. 執行全網爬蟲並發送 LINE 通知
+        env:
+          LINE_TOKEN: ${{ secrets.LINE_TOKEN }}
+          LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
+        run: python all_in_one.py
+
+      - name: 5. 將更新後的 CSV 存回 GitHub 倉庫
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add cht_all_platforms.csv
+          git diff --quiet && git diff --staged --quiet || (git commit -m "自動更新每日輿情資料" && git push)
