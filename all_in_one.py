@@ -87,7 +87,8 @@ def generate_dashboard(df_all, new_count, alert_count, keyword="中華電信"):
     """將 CSV 資料繪製成高解析度戰情室儀表板圖片 (dashboard.png)"""
     configure_chinese_font()
 
-    fig = plt.figure(figsize=(12, 6.8), dpi=160, facecolor="#F4F6F9")
+    # 拉高畫布比例 (12 x 8.2) 以容納底部最新 3 則斷線/客訴快訊
+    fig = plt.figure(figsize=(12, 8.2), dpi=160, facecolor="#F4F6F9")
     now_str = get_tw_now().strftime("%Y-%m-%d %H:%M")
 
     # 頂部主標題
@@ -96,7 +97,7 @@ def generate_dashboard(df_all, new_count, alert_count, keyword="中華電信"):
         fontsize=20,
         fontweight="bold",
         color="#1E293B",
-        y=0.95,
+        y=0.96,
     )
 
     # 頂部 3 張 KPI 數據卡片
@@ -112,16 +113,16 @@ def generate_dashboard(df_all, new_count, alert_count, keyword="中華電信"):
     ]
     for label, value, color, x_pos in kpi_specs:
         fig.text(
-            x_pos, 0.84, label, ha="center", fontsize=11, color="#475569", fontweight="bold"
+            x_pos, 0.87, label, ha="center", fontsize=11, color="#475569", fontweight="bold"
         )
         fig.text(
-            x_pos, 0.78, value, ha="center", fontsize=22, color=color, fontweight="bold"
+            x_pos, 0.815, value, ha="center", fontsize=22, color=color, fontweight="bold"
         )
 
     # 右下角：資料更新時間與總收錄落款
     fig.text(
         0.93,
-        0.025,
+        0.02,
         f"資料更新時間：{now_str} (台灣時間) ｜ 累積總收錄：{len(df_all)} 篇",
         ha="right",
         fontsize=10,
@@ -134,8 +135,8 @@ def generate_dashboard(df_all, new_count, alert_count, keyword="中華電信"):
         plt.close(fig)
         return
 
-    # 左下圖表：各平台聲量分布 (橫向長條圖)
-    ax1 = fig.add_axes([0.08, 0.13, 0.40, 0.55], facecolor="white")
+    # 中左圖表：各平台聲量分布 (橫向長條圖)
+    ax1 = fig.add_axes([0.08, 0.30, 0.40, 0.45], facecolor="white")
     platform_counts = df_all["平台分類"].value_counts().sort_values(ascending=True)
     bars = ax1.barh(platform_counts.index, platform_counts.values, color="#3B82F6", height=0.55)
     ax1.set_title("各平台輿情聲量分布", fontsize=13, fontweight="bold", color="#1E293B", pad=12)
@@ -157,8 +158,8 @@ def generate_dashboard(df_all, new_count, alert_count, keyword="中華電信"):
         )
     ax1.set_xlim(0, max(platform_counts.values) * 1.18)
 
-    # 右下圖表：輿情主題分類佔比 (圓餅圖)
-    ax2 = fig.add_axes([0.55, 0.13, 0.38, 0.55], facecolor="white")
+    # 中右圖表：輿情主題分類佔比 (圓餅圖)
+    ax2 = fig.add_axes([0.55, 0.30, 0.38, 0.45], facecolor="white")
     exploded_cats = df_all["主題分類"].dropna().str.split(" / ").explode()
     cat_counts = exploded_cats.value_counts()
 
@@ -183,6 +184,51 @@ def generate_dashboard(df_all, new_count, alert_count, keyword="中華電信"):
         autotext.set_color("white")
         autotext.set_fontweight("bold")
     ax2.set_title("輿情主題關鍵字佔比", fontsize=13, fontweight="bold", color="#1E293B", pad=12)
+
+    # 底部區塊：最新 3 則「網路斷線/客訴」文章標題與平台
+    ax3 = fig.add_axes([0.08, 0.065, 0.85, 0.17], facecolor="#FEF2F2")
+    ax3.set_xticks([])
+    ax3.set_yticks([])
+    for spine in ax3.spines.values():
+        spine.set_edgecolor("#FECACA")
+        spine.set_linewidth(1.2)
+
+    ax3.text(
+        0.02,
+        0.80,
+        "🚨 最新「網路斷線 / 客訴」輿情快訊（Top 3）",
+        fontsize=11.5,
+        fontweight="bold",
+        color="#B91C1C",
+        va="center",
+    )
+
+    alert_df = df_all[df_all["主題分類"].str.contains("網路斷線/客訴", na=False)].head(3)
+    if alert_df.empty:
+        ax3.text(
+            0.02,
+            0.42,
+            "✅ 目前資料庫中尚無任何網路斷線或重大客訴紀錄。",
+            fontsize=10.5,
+            color="#475569",
+            va="center",
+        )
+    else:
+        y_positions = [0.56, 0.34, 0.12]
+        for idx, (_, row) in enumerate(alert_df.iterrows()):
+            platform = str(row.get("平台分類", "未知平台")).replace(" (直抓完整版)", "")
+            title = str(row.get("文章標題", "")).strip()
+            # 標題過長時自動截斷並加上省略號，避免超出圖表邊界
+            if len(title) > 46:
+                title = title[:45] + "..."
+            ax3.text(
+                0.02,
+                y_positions[idx],
+                f"{idx + 1}. 【{platform}】 {title}",
+                fontsize=10.5,
+                color="#1E293B",
+                va="center",
+            )
 
     plt.savefig(DASHBOARD_IMG, bbox_inches="tight", facecolor=fig.get_facecolor())
     plt.close(fig)
