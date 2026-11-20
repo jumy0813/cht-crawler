@@ -18,14 +18,14 @@ import requests
 # ==========================================
 LINE_CONFIG = {
     "enabled": True,
-    "channel_access_token": os.environ.get("fVGM5SgXQ/CZ4fmgr9hbY5swo2q0Z56bPGDn6zj9sAG8jh6xv53drabuVerZ7Saq9flPj/oCqLKrlPFt/UQCapgh5Gx9hc3ZCBDKScp1Z6Y9H4o2D79+9IuhMO3a8eMnTS6SCcDmQ9XmuqaJv5YwsAdB04t89/1O/w1cDnyilFU=", ""),
-    "user_id": os.environ.get("U6bcc27b5c9c059a25e296cc3285c84ff", ""),
+    "channel_access_token": os.environ.get("LINE_TOKEN", "").strip(),
+    "user_id": os.environ.get("LINE_USER_ID", "").strip(),
 }
 
-# 只抓取「幾個小時內」發布的新文章？
+# 只抓取「幾個小時內」發布的新文章？（預設 24 小時內）
 MAX_ARTICLE_AGE_HOURS = 3
 
-# 是否在每次發現新文章時都附帶發送儀表板圖片？（True = 只要有新文章就發戰情圖；False = 只有發生客訴/斷線才發）
+# 是否在每次發現新文章時都附帶發送儀表板圖片？
 ALWAYS_SEND_DASHBOARD_ON_NEW = True
 
 HEADERS = {
@@ -157,7 +157,6 @@ def generate_dashboard(df_all, new_count, alert_count, keyword="中華電信"):
 
     # 右下圖表：輿情主題分類佔比 (圓餅圖)
     ax2 = fig.add_axes([0.55, 0.12, 0.38, 0.54], facecolor="white")
-    # 拆解複合分類 (例如 "網路斷線/客訴 / 資費優惠") 以便精準統計
     exploded_cats = df_all["主題分類"].dropna().str.split(" / ").explode()
     cat_counts = exploded_cats.value_counts()
 
@@ -397,7 +396,6 @@ def step_crawl_and_plot(keyword="中華電信"):
         else pd.DataFrame(columns=column_order)
     )
 
-    # 繪製最新戰情室儀表板圖表
     generate_dashboard(
         df_final,
         new_count=len(df_filtered),
@@ -405,7 +403,6 @@ def step_crawl_and_plot(keyword="中華電信"):
         keyword=keyword,
     )
 
-    # 將本次告警明細存入暫存檔，供推送圖片到 GitHub 後發送 LINE
     state = {
         "keyword": keyword,
         "new_count": len(df_filtered),
@@ -419,6 +416,14 @@ def step_crawl_and_plot(keyword="中華電信"):
 def step_notify():
     """第二階段：讀取暫存告警狀態，將文字訊息 + 儀表板圖片一併發送到 LINE"""
     if not LINE_CONFIG["enabled"] or not os.path.exists(STATE_FILE):
+        return
+
+    token = LINE_CONFIG["channel_access_token"]
+    user_id = LINE_CONFIG["user_id"]
+    print(f"[診斷資訊] 讀取到的 LINE_TOKEN 長度為：{len(token)} 字元")
+
+    if not token or not user_id:
+        print("[LINE 錯誤] LINE_TOKEN 或 LINE_USER_ID 為空值！請確認 GitHub Settings -> Secrets and variables -> Actions -> Secrets 中是否已正確設定。")
         return
 
     with open(STATE_FILE, "r", encoding="utf-8") as f:
@@ -441,7 +446,6 @@ def step_notify():
     now_str = get_tw_now().strftime("%Y-%m-%d %H:%M")
     repo = os.environ.get("GITHUB_REPO", "")
     branch = os.environ.get("GITHUB_BRANCH", "main")
-    # 加上時間戳記參數避免 LINE 快取舊圖片
     cache_buster = int(time.time())
     image_url = (
         f"https://raw.githubusercontent.com/{repo}/{branch}/dashboard.png?t={cache_buster}"
@@ -478,10 +482,10 @@ def step_notify():
     url = "https://api.line.me/v2/bot/message/push"
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {LINE_CONFIG['channel_access_token']}",
+        "Authorization": f"Bearer {token}",
     }
     payload = {
-        "to": LINE_CONFIG["user_id"],
+        "to": user_id,
         "messages": messages,
     }
 
