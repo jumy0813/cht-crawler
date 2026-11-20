@@ -38,7 +38,8 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add cht_all_platforms.csv dashboard.png
+          [ -f cht_all_platforms.csv ] && git add cht_all_platforms.csv
+          [ -f dashboard.png ] && git add dashboard.png
           git diff --quiet && git diff --staged --quiet || (git commit -m "自動更新每日輿情資料與儀表板" && git push)
 
       - name: 6. 發送包含儀表板圖片的 LINE 通知
@@ -47,4 +48,5 @@ jobs:
           LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
           GITHUB_REPO: ${{ github.repository }}
           GITHUB_BRANCH: ${{ github.ref_name }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
         run: python all_in_one.py --step notify
