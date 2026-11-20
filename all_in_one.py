@@ -23,7 +23,7 @@ LINE_CONFIG = {
 }
 
 # 只抓取「幾個小時內」發布的新文章？（預設 24 小時內）
-MAX_ARTICLE_AGE_HOURS = 3
+MAX_ARTICLE_AGE_HOURS = 24
 
 # 是否在每次發現新文章時都附帶發送儀表板圖片？
 ALWAYS_SEND_DASHBOARD_ON_NEW = True
@@ -98,14 +98,6 @@ def generate_dashboard(df_all, new_count, alert_count, keyword="中華電信"):
         color="#1E293B",
         y=0.95,
     )
-    fig.text(
-        0.5,
-        0.895,
-        f"資料更新時間：{now_str} (台灣時間) ｜ 累積總收錄：{len(df_all)} 篇",
-        ha="center",
-        fontsize=11,
-        color="#64748B",
-    )
 
     # 頂部 3 張 KPI 數據卡片
     kpi_specs = [
@@ -120,20 +112,30 @@ def generate_dashboard(df_all, new_count, alert_count, keyword="中華電信"):
     ]
     for label, value, color, x_pos in kpi_specs:
         fig.text(
-            x_pos, 0.81, label, ha="center", fontsize=11, color="#475569", fontweight="bold"
+            x_pos, 0.84, label, ha="center", fontsize=11, color="#475569", fontweight="bold"
         )
         fig.text(
-            x_pos, 0.75, value, ha="center", fontsize=22, color=color, fontweight="bold"
+            x_pos, 0.78, value, ha="center", fontsize=22, color=color, fontweight="bold"
         )
 
+    # 右下角：資料更新時間與總收錄落款
+    fig.text(
+        0.93,
+        0.025,
+        f"資料更新時間：{now_str} (台灣時間) ｜ 累積總收錄：{len(df_all)} 篇",
+        ha="right",
+        fontsize=10,
+        color="#64748B",
+    )
+
     if df_all.empty:
-        fig.text(0.5, 0.42, "目前尚無足夠資料可供繪製圖表", ha="center", fontsize=14, color="#94A3B8")
+        fig.text(0.5, 0.45, "目前尚無足夠資料可供繪製圖表", ha="center", fontsize=14, color="#94A3B8")
         plt.savefig(DASHBOARD_IMG, bbox_inches="tight", facecolor=fig.get_facecolor())
         plt.close(fig)
         return
 
     # 左下圖表：各平台聲量分布 (橫向長條圖)
-    ax1 = fig.add_axes([0.08, 0.12, 0.40, 0.54], facecolor="white")
+    ax1 = fig.add_axes([0.08, 0.13, 0.40, 0.55], facecolor="white")
     platform_counts = df_all["平台分類"].value_counts().sort_values(ascending=True)
     bars = ax1.barh(platform_counts.index, platform_counts.values, color="#3B82F6", height=0.55)
     ax1.set_title("各平台輿情聲量分布", fontsize=13, fontweight="bold", color="#1E293B", pad=12)
@@ -156,7 +158,7 @@ def generate_dashboard(df_all, new_count, alert_count, keyword="中華電信"):
     ax1.set_xlim(0, max(platform_counts.values) * 1.18)
 
     # 右下圖表：輿情主題分類佔比 (圓餅圖)
-    ax2 = fig.add_axes([0.55, 0.12, 0.38, 0.54], facecolor="white")
+    ax2 = fig.add_axes([0.55, 0.13, 0.38, 0.55], facecolor="white")
     exploded_cats = df_all["主題分類"].dropna().str.split(" / ").explode()
     cat_counts = exploded_cats.value_counts()
 
