@@ -26,7 +26,7 @@ jobs:
           sudo apt-get update && sudo apt-get install -y fonts-noto-cjk
           pip install requests beautifulsoup4 pandas lxml matplotlib
 
-      - name: 4. 先產生最新儀表板並推送至倉庫（供 LINE 讀取圖片網址）
+      - name: 4. 先產生最新雙戰情圖卡並暫存狀態
         env:
           LINE_TOKEN: ${{ secrets.LINE_TOKEN }}
           LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
@@ -34,15 +34,16 @@ jobs:
           GITHUB_BRANCH: ${{ github.ref_name }}
         run: python all_in_one.py --step crawl_and_plot
 
-      - name: 5. 將更新後的 CSV 與儀表板圖片存回 GitHub 倉庫
+      - name: 5. 將更新後的 CSV 與兩張戰情圖卡存回 GitHub 倉庫
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           [ -f cht_all_platforms.csv ] && git add cht_all_platforms.csv
           [ -f dashboard.png ] && git add dashboard.png
-          git diff --quiet && git diff --staged --quiet || (git commit -m "自動更新每日輿情資料與儀表板" && git push)
+          [ -f alert_card.png ] && git add alert_card.png
+          git diff --quiet && git diff --staged --quiet || (git commit -m "自動更新每日輿情資料與雙戰情圖卡" && git push)
 
-      - name: 6. 發送包含儀表板圖片的 LINE 通知
+      - name: 6. 發送包含雙戰情圖卡的 LINE 通知
         env:
           LINE_TOKEN: ${{ secrets.LINE_TOKEN }}
           LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
