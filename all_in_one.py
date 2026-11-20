@@ -1,4 +1,5 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 import os
 import time
 import urllib.parse
@@ -7,13 +8,16 @@ import pandas as pd
 import requests
 
 # ==========================================
-# 1. LINE Messaging API 告警設定區（自動從 GitHub Secrets 讀取密碼）
+# 1. LINE Messaging API 與時間過濾設定區
 # ==========================================
 LINE_CONFIG = {
     "enabled": True,
     "channel_access_token": os.environ.get("LINE_TOKEN", ""),
     "user_id": os.environ.get("LINE_USER_ID", ""),
 }
+
+# 只抓取「幾個小時內」發布的新文章？（預設 24 小時內，可依需求改成 12 或 6）
+MAX_ARTICLE_AGE_HOURS = 3
 
 HEADERS = {
     "User-Agent": (
@@ -109,6 +113,39 @@ CATEGORY_KEYWORDS = {
 }
 
 
+def get_tw_now():
+    """取得台灣標準時間 (UTC+8)"""
+    return datetime.now(timezone(timedelta(hours=8)))
+
+
+def is_recent_article(pub_date_str, max_hours=MAX_ARTICLE_AGE_HOURS):
+    """檢查文章發布時間是否在指定小時數內，過濾掉舊文章"""
+    if not pub_date_str:
+        return True  # 若平台未提供明確時間字串則先保留
+
+    now_utc = datetime.now(timezone.utc)
+    cutoff_utc = now_utc - timedelta(hours=max_hours)
+
+    try:
+        # 1. 解析 Google News RSS 標準時間 (例如: Fri, 20 Nov 2026 03:30:00 GMT)
+        dt = parsedate_to_datetime(pub_date_str)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt >= cutoff_utc
+    except Exception:
+        pass
+
+    try:
+        # 2. 解析 PTT 內文時間格式 (例如: Fri Nov 20 11:30:00 2026)
+        dt_naive = datetime.strptime(pub_date_str.strip(), "%a %b %d %H:%M:%S %Y")
+        dt_tw = dt_naive.replace(tzinfo=timezone(timedelta(hours=8)))
+        return dt_tw.astimezone(timezone.utc) >= cutoff_utc
+    except Exception:
+        pass
+
+    return True
+
+
 def send_line_alert(alert_df, keyword):
     """透過 LINE Messaging API 發送緊急客訴/斷線通知"""
     if not LINE_CONFIG["enabled"] or alert_df.empty:
@@ -121,17 +158,18 @@ def send_line_alert(alert_df, keyword):
         return
 
     count = len(alert_df)
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+    now_str = get_tw_now().strftime("%Y-%m-%d %H:%M")
 
     lines = [
         "🚨 【雲端輿情緊急告警】",
-        f"偵測到 {count} 篇「{keyword} - 網路斷線/客訴」新文章！",
-        f"執行時間：{now_str} (UTC)",
+        f"偵測到 {count} 篇「{keyword} - 網路斷線/客訴」最新貼文！",
+        f"告警時間：{now_str} (台灣時間)",
         "━━━━━━━━━━━━━━",
     ]
 
     for idx, (_, row) in enumerate(alert_df.head(10).iterrows(), start=1):
         lines.append(f"\n{idx}. [{row['平台分類']}] {row['文章標題']}")
+        lines.append(f"🕒 發布：{row['發布時間']}")
         lines.append(f"🔗 {row['文章連結']}")
 
     if count > 10:
@@ -153,7 +191,7 @@ def send_line_alert(alert_df, keyword):
         res = requests.post(url, headers=headers, json=payload, timeout=10)
         if res.status_code == 200:
             print(
-                f"\n[LINE 通知] 已成功發送 LINE 告警訊息（共 {count} 筆客訴/斷線文章）！"
+                f"\n[LINE 通知] 已成功發送 LINE 告警訊息（共 {count} 筆最新客訴/斷線文章）！"
             )
         else:
             print(
@@ -181,8 +219,10 @@ def classify_article(title, content=""):
 
 
 def fetch_google_rss(query, platform_label, max_results=20):
-    """透過 Google 索引抓取新聞與各社群平台公開文章"""
-    encoded_q = urllib.parse.quote(query)
+    """透過 Google 索引抓取最近 24 小時內的新聞與各社群平台公開文章"""
+    # 加上 when:1d 強制 Google 只回傳最近 1 天內的索引結果
+    time_bounded_query = f"{query} when:1d"
+    encoded_q = urllib.parse.quote(time_bounded_query)
     url = f"https://news.google.com/rss/search?q={encoded_q}&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
 
     results = []
@@ -196,12 +236,16 @@ def fetch_google_rss(query, platform_label, max_results=20):
             link = item.link.text.strip() if item.link else ""
             pub_date = item.pubDate.text.strip() if item.pubDate else ""
             source = item.source.text.strip() if item.source else platform_label
-            summary = "（請點擊連結查看完整貼文）"
 
+            # 嚴格檢查時間，超過 MAX_ARTICLE_AGE_HOURS 的舊文直接跳過
+            if not is_recent_article(pub_date):
+                continue
+
+            summary = "（請點擊連結查看完整貼文）"
             category = classify_article(title, summary)
 
             results.append({
-                "抓取時間": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "抓取時間": get_tw_now().strftime("%Y-%m-%d %H:%M:%S"),
                 "主題分類": category,
                 "平台分類": platform_label,
                 "來源網站": source,
@@ -217,7 +261,7 @@ def fetch_google_rss(query, platform_label, max_results=20):
 
 
 def fetch_ptt_direct(keyword="中華電信", pages=2):
-    """直接深入 PTT MobileComm 看板抓取完整標題與內文"""
+    """直接深入 PTT MobileComm 看板抓取最新完整標題與內文"""
     base_url = "https://www.ptt.cc"
     encoded_kw = urllib.parse.quote(keyword)
     current_url = f"{base_url}/bbs/MobileComm/search?q={encoded_kw}"
@@ -235,6 +279,7 @@ def fetch_ptt_direct(keyword="中華電信", pages=2):
 
             soup = BeautifulSoup(res.text, "html.parser")
             entries = soup.find_all("div", class_="r-ent")
+            stop_paging = False
 
             for entry in entries:
                 a_tag = (
@@ -260,6 +305,12 @@ def fetch_ptt_direct(keyword="中華電信", pages=2):
                         "span", class_="article-meta-value"
                     )
                     pub_time = metas[3].text.strip() if len(metas) >= 4 else ""
+
+                    # 若該篇 PTT 文章已超過設定時數，直接略過且無需再往更舊頁面翻頁
+                    if pub_time and not is_recent_article(pub_time):
+                        stop_paging = True
+                        continue
+
                     for tag in main_content.find_all(
                         "div",
                         class_=[
@@ -279,7 +330,7 @@ def fetch_ptt_direct(keyword="中華電信", pages=2):
                 category = classify_article(title, clean_content)
 
                 results.append({
-                    "抓取時間": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "抓取時間": get_tw_now().strftime("%Y-%m-%d %H:%M:%S"),
                     "主題分類": category,
                     "平台分類": "PTT (直抓完整版)",
                     "來源網站": "PTT MobileComm",
@@ -289,6 +340,9 @@ def fetch_ptt_direct(keyword="中華電信", pages=2):
                     "內文摘要": clean_content,
                 })
                 time.sleep(0.5)
+
+            if stop_paging:
+                break
 
             paging_div = soup.find("div", class_="btn-group-paging")
             prev_btn = (
@@ -309,7 +363,9 @@ def fetch_ptt_direct(keyword="中華電信", pages=2):
 
 def run_all_crawlers(keyword="中華電信"):
     new_data = []
-    print(f"=== 開始執行雲端全網輿情爬蟲（關鍵字：{keyword}）===\n")
+    print(
+        f"=== 開始執行雲端全網輿情爬蟲（關鍵字：{keyword}｜僅收錄最近 {MAX_ARTICLE_AGE_HOURS} 小時發文）===\n"
+    )
 
     print("1. 正在收集【各大新聞媒體】...")
     new_data.extend(fetch_google_rss(f"{keyword}", "新聞媒體", max_results=30))
@@ -368,16 +424,16 @@ def run_all_crawlers(keyword="中華電信"):
         df_filtered = df_new[mask_new]
 
         print(
-            f"\n比對完成：本次共掃描 {len(df_new)} 筆，過濾掉"
-            f" {len(df_new) - len(df_filtered)} 筆重複舊文章。"
+            f"\n比對完成：本次共掃描 {len(df_new)} 筆近期文章，過濾掉"
+            f" {len(df_new) - len(df_filtered)} 筆已收錄文章。"
         )
-        print(f"實際新增：{len(df_filtered)} 筆新文章！")
+        print(f"實際新增：{len(df_filtered)} 筆最新文章！")
 
         df_final = pd.concat([df_filtered, df_old], ignore_index=True)
     else:
         df_filtered = df_new
         df_final = df_new
-        print(f"\n首次執行建立檔案！共寫入 {len(df_final)} 筆新文章。")
+        print(f"\n首次執行建立檔案！共寫入 {len(df_final)} 筆最新文章。")
 
     df_final = df_final[column_order]
     df_final.to_csv(OUTPUT_FILE, index=False, encoding="utf-8-sig")
